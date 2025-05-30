@@ -427,6 +427,13 @@ export const api = {
   // 구글 스프레드시트로 내보내기
   exportToGoogleSheets: async (sessionName: string, data: any[][]) => {
     try {
+      console.log("=== 구글 시트 내보내기 API 호출 시작 ===");
+      console.log("요청 데이터:", {
+        sessionName,
+        dataLength: data.length,
+        dataPreview: data.slice(0, 3),
+      });
+
       const response = await fetch("/api/export/google-sheets", {
         method: "POST",
         headers: {
@@ -439,9 +446,18 @@ export const api = {
         }),
       });
 
+      console.log("HTTP 응답 상태:", {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+        headers: Object.fromEntries(response.headers.entries()),
+      });
+
       const result = await response.json();
+      console.log("서버 응답 데이터:", result);
 
       if (response.ok) {
+        console.log("✅ 구글 시트 내보내기 성공:", result);
         return {
           success: true,
           message: result.message,
@@ -450,16 +466,31 @@ export const api = {
           sheetUrl: result.sheetUrl,
         };
       } else {
+        console.error("❌ 구글 시트 내보내기 실패:", {
+          status: response.status,
+          statusText: response.statusText,
+          error: result.error,
+          fullResponse: result,
+        });
         return {
           success: false,
           error: result.error || "구글 시트 내보내기에 실패했습니다.",
         };
       }
-    } catch (error) {
-      console.error("구글 시트 내보내기 API 오류:", error);
+    } catch (error: any) {
+      console.error("❌ 구글 시트 내보내기 API 오류:");
+      console.error("오류 타입:", error.constructor.name);
+      console.error("오류 메시지:", error.message);
+      console.error("전체 오류 객체:", error);
+      console.error("네트워크 정보:", {
+        type: error.name,
+        code: error.code,
+        stack: error.stack?.split("\n").slice(0, 5), // 스택 트레이스 일부만
+      });
+
       return {
         success: false,
-        error: "네트워크 오류가 발생했습니다.",
+        error: `네트워크 오류가 발생했습니다: ${error.message}`,
       };
     }
   },
