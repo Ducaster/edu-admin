@@ -3,6 +3,12 @@ import { NextRequest, NextResponse } from "next/server";
 export async function GET(request: NextRequest) {
   try {
     // 다양한 방식으로 환경변수 접근 시도
+    const rawPrivateKey = process.env.GOOGLE_PRIVATE_KEY;
+    const processedPrivateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(
+      /\\n/g,
+      "\n"
+    );
+
     const envStatus = {
       // 구글 API 관련 - 기본 방식
       GOOGLE_CLIENT_EMAIL: {
@@ -11,18 +17,23 @@ export async function GET(request: NextRequest) {
         value: process.env.GOOGLE_CLIENT_EMAIL || "UNDEFINED",
       },
       GOOGLE_PRIVATE_KEY: {
-        exists: !!process.env.GOOGLE_PRIVATE_KEY,
-        length: process.env.GOOGLE_PRIVATE_KEY?.length || 0,
-        hasBeginMarker:
-          process.env.GOOGLE_PRIVATE_KEY?.includes(
-            "-----BEGIN PRIVATE KEY-----"
-          ) || false,
-        hasEndMarker:
-          process.env.GOOGLE_PRIVATE_KEY?.includes(
-            "-----END PRIVATE KEY-----"
-          ) || false,
-        preview: process.env.GOOGLE_PRIVATE_KEY
-          ? process.env.GOOGLE_PRIVATE_KEY.substring(0, 50) + "..."
+        exists: !!rawPrivateKey,
+        length: rawPrivateKey?.length || 0,
+        rawHasBeginMarker:
+          rawPrivateKey?.includes("-----BEGIN PRIVATE KEY-----") || false,
+        rawHasEndMarker:
+          rawPrivateKey?.includes("-----END PRIVATE KEY-----") || false,
+        rawHasBackslashN: rawPrivateKey?.includes("\\n") || false,
+        rawHasRealNewline: rawPrivateKey?.includes("\n") || false,
+        processedHasBeginMarker:
+          processedPrivateKey?.includes("-----BEGIN PRIVATE KEY-----") || false,
+        processedHasEndMarker:
+          processedPrivateKey?.includes("-----END PRIVATE KEY-----") || false,
+        rawPreview: rawPrivateKey
+          ? rawPrivateKey.substring(0, 100) + "..."
+          : "UNDEFINED",
+        processedPreview: processedPrivateKey
+          ? processedPrivateKey.substring(0, 100) + "..."
           : "UNDEFINED",
       },
       GOOGLE_SPREADSHEET_ID: {
@@ -64,6 +75,20 @@ export async function GET(request: NextRequest) {
         NEXT_RUNTIME: process.env.NEXT_RUNTIME,
         VERCEL_ENV: process.env.VERCEL_ENV,
       },
+
+      // PEM 키 분석
+      pemAnalysis: rawPrivateKey
+        ? {
+            totalLines: rawPrivateKey.split("\n").length,
+            backslashNCount: (rawPrivateKey.match(/\\n/g) || []).length,
+            realNewlineCount: (rawPrivateKey.match(/\n/g) || []).length,
+            firstLine:
+              rawPrivateKey.split("\n")[0] || rawPrivateKey.split("\\n")[0],
+            lastLine:
+              rawPrivateKey.split("\n").pop() ||
+              rawPrivateKey.split("\\n").pop(),
+          }
+        : null,
     };
 
     // 콘솔에도 출력
@@ -78,14 +103,23 @@ export async function GET(request: NextRequest) {
     );
     console.log(
       "GOOGLE_PRIVATE_KEY:",
-      process.env.GOOGLE_PRIVATE_KEY
-        ? `EXISTS (${process.env.GOOGLE_PRIVATE_KEY.length} chars)`
-        : "NOT_EXISTS"
+      rawPrivateKey ? `EXISTS (${rawPrivateKey.length} chars)` : "NOT_EXISTS"
     );
     console.log(
       "GOOGLE_SPREADSHEET_ID:",
       process.env.GOOGLE_SPREADSHEET_ID ? "EXISTS" : "NOT_EXISTS"
     );
+
+    if (rawPrivateKey) {
+      console.log("=== Private Key 분석 ===");
+      console.log("Raw key starts with:", rawPrivateKey.substring(0, 50));
+      console.log(
+        "Raw key ends with:",
+        rawPrivateKey.substring(rawPrivateKey.length - 50)
+      );
+      console.log("Contains \\n:", rawPrivateKey.includes("\\n"));
+      console.log("Contains real newline:", rawPrivateKey.includes("\n"));
+    }
 
     return NextResponse.json({
       success: true,
