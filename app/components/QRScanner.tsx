@@ -37,6 +37,9 @@ export default function QRScanner() {
   const [permissionError, setPermissionError] = useState(false);
   const [qrLocation, setQrLocation] = useState<QRLocation | null>(null);
   const [animateQR, setAnimateQR] = useState(false);
+  const [cameraFacing, setCameraFacing] = useState<"user" | "environment">(
+    "user"
+  ); // 카메라 방향 상태
   const scannerRef = useRef<HTMLDivElement>(null);
 
   // 교육 회차 목록 (1-1부터 22-3까지)
@@ -136,7 +139,7 @@ export default function QRScanner() {
       };
 
       await html5QrCode.start(
-        { facingMode: "environment" },
+        { facingMode: cameraFacing },
         config,
         onScanSuccess,
         onScanFailure
@@ -168,6 +171,58 @@ export default function QRScanner() {
       setQrLocation(null);
     } catch (error) {
       console.error("QR 스캐너 종료 오류:", error);
+    }
+  };
+
+  // 카메라 전환 함수
+  const switchCamera = async () => {
+    if (!scanning) return;
+
+    try {
+      // 현재 스캐너 중지
+      await stopScanner();
+
+      // 카메라 방향 전환
+      const newFacing = cameraFacing === "user" ? "environment" : "user";
+      setCameraFacing(newFacing);
+
+      // 잠시 대기 후 새로운 카메라로 시작
+      setTimeout(async () => {
+        try {
+          setScanning(true);
+          setQrLocation(null);
+
+          const config = {
+            fps: 8,
+            qrbox: undefined,
+            aspectRatio: 16 / 9,
+            disableFlip: false,
+            experimentalFeatures: {
+              useBarCodeDetectorIfSupported: true,
+            },
+          };
+
+          await html5QrCode.start(
+            { facingMode: newFacing },
+            config,
+            onScanSuccess,
+            onScanFailure
+          );
+
+          toast.success(
+            newFacing === "user"
+              ? "전면 카메라로 전환되었습니다"
+              : "후면 카메라로 전환되었습니다",
+            { toastId: "camera-switch" }
+          );
+        } catch (error) {
+          console.error("카메라 전환 오류:", error);
+          toast.error("카메라 전환에 실패했습니다. 다시 시도해주세요.");
+          setScanning(false);
+        }
+      }, 500);
+    } catch (error) {
+      console.error("카메라 전환 준비 오류:", error);
     }
   };
 
@@ -690,7 +745,7 @@ export default function QRScanner() {
               </div>
 
               {/* 스캐너 컨트롤 */}
-              <div className="mt-2 sm:mt-4 lg:mt-6 flex justify-center">
+              <div className="mt-2 sm:mt-4 lg:mt-6 flex justify-center items-center gap-3">
                 {!scanning ? (
                   <button
                     onClick={startScanner}
@@ -712,31 +767,59 @@ export default function QRScanner() {
                     QR 스캐너 시작
                   </button>
                 ) : (
-                  <button
-                    onClick={stopScanner}
-                    className="px-4 py-2 sm:px-6 sm:py-3 lg:px-8 lg:py-4 bg-red-600 text-white rounded-lg lg:rounded-xl hover:bg-red-700 font-semibold text-sm sm:text-base lg:text-lg shadow-lg transition-all duration-200 hover:scale-105 flex items-center gap-2 sm:gap-3"
-                  >
-                    <svg
-                      className="w-4 h-4 sm:w-5 sm:h-5 lg:w-6 lg:h-6"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
+                  <>
+                    <button
+                      onClick={stopScanner}
+                      className="px-4 py-2 sm:px-6 sm:py-3 lg:px-8 lg:py-4 bg-red-600 text-white rounded-lg lg:rounded-xl hover:bg-red-700 font-semibold text-sm sm:text-base lg:text-lg shadow-lg transition-all duration-200 hover:scale-105 flex items-center gap-2 sm:gap-3"
                     >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                      />
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"
-                      />
-                    </svg>
-                    스캐너 중지
-                  </button>
+                      <svg
+                        className="w-4 h-4 sm:w-5 sm:h-5 lg:w-6 lg:h-6"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"
+                        />
+                      </svg>
+                      스캐너 중지
+                    </button>
+                    <button
+                      onClick={switchCamera}
+                      className="px-3 py-2 sm:px-4 sm:py-3 lg:px-6 lg:py-4 bg-purple-600 text-white rounded-lg lg:rounded-xl hover:bg-purple-700 font-semibold text-sm sm:text-base lg:text-lg shadow-lg transition-all duration-200 hover:scale-105 flex items-center gap-2"
+                      title={
+                        cameraFacing === "user"
+                          ? "후면 카메라로 전환"
+                          : "전면 카메라로 전환"
+                      }
+                    >
+                      <svg
+                        className="w-4 h-4 sm:w-5 sm:h-5 lg:w-6 lg:h-6"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                        />
+                      </svg>
+                      <span className="hidden sm:inline">
+                        {cameraFacing === "user" ? "후면" : "전면"}
+                      </span>
+                    </button>
+                  </>
                 )}
               </div>
 
