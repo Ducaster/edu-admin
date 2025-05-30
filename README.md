@@ -1,3 +1,23 @@
+# 교육 관리 시스템
+
+출석 관리와 QR 코드 스캔 기능을 제공하는 교육 관리 시스템입니다.
+
+## 기능
+
+- QR 코드 스캔을 통한 출석 체크
+- 구글 시트로 출석 데이터 내보내기
+- 세션별 출석 관리
+
+## 환경변수 설정 (AWS Amplify)
+
+다음 환경변수들이 필요합니다:
+
+- `GOOGLE_CLIENT_EMAIL`
+- `GOOGLE_PRIVATE_KEY`
+- `GOOGLE_SPREADSHEET_ID`
+
+<!-- 환경변수 재배포 테스트: 2025-05-30 -->
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started

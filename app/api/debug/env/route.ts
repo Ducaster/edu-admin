@@ -61,10 +61,24 @@ export async function GET(request: NextRequest) {
         _HANDLER: process.env._HANDLER,
       },
 
+      // Amplify Secrets vs Environment Variables 구분
+      amplifyVariables: {
+        // AWS Amplify 관련 환경변수들
+        AWS_AMPLIFY_APP_ID: process.env.AWS_AMPLIFY_APP_ID,
+        AWS_AMPLIFY_BRANCH: process.env.AWS_AMPLIFY_BRANCH,
+        AWS_AMPLIFY_REGION: process.env.AWS_AMPLIFY_REGION,
+        AMPLIFY_DIFF_DEPLOY: process.env.AMPLIFY_DIFF_DEPLOY,
+        AMPLIFY_MONOREPO_APP_ROOT: process.env.AMPLIFY_MONOREPO_APP_ROOT,
+      },
+
       // 구글 관련 환경변수 목록 (더 상세히)
       allGoogleEnvs: Object.keys(process.env).filter((key) =>
         key.includes("GOOGLE")
       ),
+      allAmplifyEnvs: Object.keys(process.env).filter((key) =>
+        key.includes("AMPLIFY")
+      ),
+      allAWSEnvs: Object.keys(process.env).filter((key) => key.includes("AWS")),
       allEnvKeys: Object.keys(process.env).sort(),
 
       // 전체 환경변수 개수
@@ -89,6 +103,16 @@ export async function GET(request: NextRequest) {
               rawPrivateKey.split("\\n").pop(),
           }
         : null,
+
+      // Secret vs Environment Variable 구분 정보
+      secretsInfo: {
+        recommendation:
+          "GOOGLE_PRIVATE_KEY should be stored as Amplify Secret, not Environment Variable",
+        securityNote:
+          "Environment variables are rendered in plaintext to build artifacts",
+        amplifySecretsPath:
+          "AWS Amplify Console > Hosting > Secrets > Manage secrets",
+      },
     };
 
     // 콘솔에도 출력
@@ -110,6 +134,17 @@ export async function GET(request: NextRequest) {
       process.env.GOOGLE_SPREADSHEET_ID ? "EXISTS" : "NOT_EXISTS"
     );
 
+    // Amplify 관련 환경변수 체크
+    console.log("=== Amplify 환경변수 체크 ===");
+    console.log(
+      "AWS_AMPLIFY_APP_ID:",
+      process.env.AWS_AMPLIFY_APP_ID || "NOT_EXISTS"
+    );
+    console.log(
+      "AWS_AMPLIFY_BRANCH:",
+      process.env.AWS_AMPLIFY_BRANCH || "NOT_EXISTS"
+    );
+
     if (rawPrivateKey) {
       console.log("=== Private Key 분석 ===");
       console.log("Raw key starts with:", rawPrivateKey.substring(0, 50));
@@ -126,6 +161,8 @@ export async function GET(request: NextRequest) {
       timestamp: new Date().toISOString(),
       environment: envStatus,
       buildTime: new Date().toISOString(), // 빌드 시간 확인용
+      recommendation:
+        "Use Amplify Secrets for sensitive data like GOOGLE_PRIVATE_KEY",
     });
   } catch (error: any) {
     console.error("환경변수 디버깅 오류:", error);
