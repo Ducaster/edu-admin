@@ -6,6 +6,9 @@ frontend:
         - npm ci
     build:
       commands:
+        - echo "GOOGLE_CLIENT_EMAIL=$GOOGLE_CLIENT_EMAIL" >> .env
+        - echo "GOOGLE_PRIVATE_KEY=$GOOGLE_PRIVATE_KEY" >> .env
+        - echo "GOOGLE_SPREADSHEET_ID=$GOOGLE_SPREADSHEET_ID" >> .env
         - npm run build
   artifacts:
     baseDirectory: .next
