@@ -186,26 +186,36 @@ export default function DashboardPage() {
     }
   };
 
+  // 통합 필터링 함수
+  const applyFilters = () => {
+    let filtered = [...attendanceRecords];
+
+    // 회차 필터링
+    if (selectedSessionId) {
+      filtered = filtered.filter(
+        (record) => record.sessionId === selectedSessionId
+      );
+    }
+
+    // 출석번호 필터링
+    if (searchNumber.trim()) {
+      filtered = filtered.filter((record) =>
+        record.studentNumber.toString().includes(searchNumber.trim())
+      );
+    }
+
+    setFilteredRecords(filtered);
+  };
+
   // 검색 기능
   const handleSearch = (searchValue: string) => {
     setSearchNumber(searchValue);
-
-    if (!searchValue.trim()) {
-      // 검색어가 없으면 전체 기록 표시
-      setFilteredRecords(attendanceRecords);
-    } else {
-      // 출석번호로 필터링
-      const filtered = attendanceRecords.filter((record) =>
-        record.studentNumber.toString().includes(searchValue.trim())
-      );
-      setFilteredRecords(filtered);
-    }
   };
 
-  // 검색어 변경 시 실시간 필터링
+  // 출석 데이터, 검색어, 선택된 회차가 변경될 때마다 필터링 적용
   useEffect(() => {
-    handleSearch(searchNumber);
-  }, [attendanceRecords, searchNumber]);
+    applyFilters();
+  }, [attendanceRecords, searchNumber, selectedSessionId]);
 
   const handleLogout = () => {
     removeToken();
@@ -743,7 +753,7 @@ export default function DashboardPage() {
                         />
                         {searchNumber && (
                           <button
-                            onClick={() => handleSearch("")}
+                            onClick={() => setSearchNumber("")}
                             className="absolute inset-y-0 right-0 pr-3 flex items-center"
                           >
                             <svg
@@ -830,31 +840,31 @@ export default function DashboardPage() {
                     {filteredRecords.length > 0 ? (
                       <div className="px-4 sm:px-6 lg:px-8 py-6">
                         <div className="max-w-7xl mx-auto">
-                          <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                          <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
                             <table className="min-w-full divide-y divide-gray-200">
                               <thead className="bg-indigo-50">
                                 <tr>
                                   <th
                                     scope="col"
-                                    className="px-6 py-4 text-left text-xs font-bold text-indigo-800 uppercase tracking-wider"
+                                    className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-indigo-800 uppercase tracking-wider"
                                   >
                                     출석번호
                                   </th>
                                   <th
                                     scope="col"
-                                    className="px-6 py-4 text-left text-xs font-bold text-indigo-800 uppercase tracking-wider"
+                                    className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-indigo-800 uppercase tracking-wider"
                                   >
                                     날짜
                                   </th>
                                   <th
                                     scope="col"
-                                    className="px-6 py-4 text-left text-xs font-bold text-indigo-800 uppercase tracking-wider"
+                                    className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-indigo-800 uppercase tracking-wider"
                                   >
                                     시간
                                   </th>
                                   <th
                                     scope="col"
-                                    className="px-6 py-4 text-left text-xs font-bold text-indigo-800 uppercase tracking-wider"
+                                    className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-indigo-800 uppercase tracking-wider"
                                   >
                                     회차
                                   </th>
@@ -870,16 +880,16 @@ export default function DashboardPage() {
                                         : "bg-indigo-50"
                                     } hover:bg-indigo-100 transition-colors duration-150`}
                                   >
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                                       {record.studentNumber}
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                                       {record.date}
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                                       {record.time}
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                                       {record.sessionId
                                         ? sessionOptions.find(
                                             (option) =>
@@ -933,7 +943,7 @@ export default function DashboardPage() {
                           </p>
                           {searchNumber && (
                             <button
-                              onClick={() => handleSearch("")}
+                              onClick={() => setSearchNumber("")}
                               className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium"
                             >
                               전체 기록 보기

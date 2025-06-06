@@ -864,9 +864,11 @@ export default function QRScanner() {
                 .animate-scan-line {
                   animation: scan-line 2s infinite ease-in-out;
                 }
-                /* 비디오 요소에만 미러모드 적용 */
+                /* 전면카메라일 때만 미러모드 적용 */
                 #qr-reader video {
-                  transform: scaleX(-1) !important;
+                  transform: ${cameraFacing === "user"
+                    ? "scaleX(-1)"
+                    : "scaleX(1)"} !important;
                 }
               `}</style>
 
