@@ -123,24 +123,31 @@ export default function QRScanner() {
       return;
     }
 
-    // 안드로이드에서 앱 최초 시작 시 모든 카메라 권한 미리 요청
+    // 안드로이드에서 카메라 장치 및 권한 사전 확인
     if (/Android/i.test(navigator.userAgent)) {
       try {
-        // 현재 사용하지 않는 다른 카메라 권한도 미리 요청
-        const otherFacing = cameraFacing === "user" ? "environment" : "user";
-        try {
-          const otherStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: otherFacing },
-          });
-          otherStream.getTracks().forEach((track) => track.stop());
-        } catch (error) {
-          // 실패해도 계속 진행
-        }
+        // 사용 가능한 카메라 장치 확인
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(
+          (device) => device.kind === "videoinput"
+        );
 
-        // 권한 요청 완료 후 잠시 대기
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        if (videoDevices.length > 1) {
+          // 여러 카메라가 있을 때만 다른 카메라 권한 미리 요청
+          const otherFacing = cameraFacing === "user" ? "environment" : "user";
+          try {
+            const testStream = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: otherFacing },
+            });
+            testStream.getTracks().forEach((track) => track.stop());
+            // 안드로이드에서 스트림 해제 대기 시간 필요
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          } catch (error) {
+            // 권한 거부되거나 카메라 없으면 계속 진행
+          }
+        }
       } catch (error) {
-        // 실패해도 계속 진행
+        // 장치 확인 실패해도 계속 진행
       }
     }
 
@@ -209,20 +216,12 @@ export default function QRScanner() {
       // 권한이 이미 허용된 경우 불필요한 권한 요청을 방지하기 위해
       // 안드로이드에서도 바로 카메라 전환 시도
 
-      // 카메라 장치 사용 가능성 확인 (안드로이드 호환성)
+      // 카메라 장치 사용 가능성 확인 및 안드로이드 특화 처리
+      let preferredDeviceId = null;
       try {
         const devices = await navigator.mediaDevices.enumerateDevices();
         const videoDevices = devices.filter(
           (device) => device.kind === "videoinput"
-        );
-
-        const hasRequestedCamera = videoDevices.some(
-          (device) =>
-            (newFacing === "user" &&
-              device.label.toLowerCase().includes("front")) ||
-            (newFacing === "environment" &&
-              device.label.toLowerCase().includes("back")) ||
-            device.label.toLowerCase().includes(newFacing)
         );
 
         if (videoDevices.length < 2) {
@@ -230,8 +229,26 @@ export default function QRScanner() {
           setScanning(true); // 기존 상태 복원
           return;
         }
+
+        // 안드로이드에서 특정 카메라 장치 ID 찾기
+        if (/Android/i.test(navigator.userAgent)) {
+          const targetDevice = videoDevices.find((device) => {
+            const label = device.label.toLowerCase();
+            return (
+              (newFacing === "user" &&
+                (label.includes("front") || label.includes("user"))) ||
+              (newFacing === "environment" &&
+                (label.includes("back") ||
+                  label.includes("rear") ||
+                  label.includes("environment")))
+            );
+          });
+
+          if (targetDevice) {
+            preferredDeviceId = targetDevice.deviceId;
+          }
+        }
       } catch (error) {
-        console.warn("카메라 장치 확인 실패:", error);
         // 에러가 나도 계속 진행 (일부 브라우저에서 권한 문제로 실패할 수 있음)
       }
 
@@ -255,10 +272,28 @@ export default function QRScanner() {
             },
           };
 
-          // 안드로이드에서 더 구체적인 제약조건 사용
-          const constraints = /Android/i.test(navigator.userAgent)
-            ? { facingMode: { exact: newFacing } }
-            : { facingMode: newFacing };
+          // 안드로이드에서 단계적 제약조건 적용
+          let constraints;
+          if (/Android/i.test(navigator.userAgent)) {
+            if (preferredDeviceId) {
+              // 안드로이드: 특정 장치 ID가 있으면 우선 사용
+              constraints = {
+                deviceId: { exact: preferredDeviceId },
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+              };
+            } else {
+              // 장치 ID가 없으면 facingMode로 fallback
+              constraints = {
+                facingMode: { ideal: newFacing },
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+              };
+            }
+          } else {
+            // iOS: 일반적인 제약조건 사용
+            constraints = { facingMode: newFacing };
+          }
 
           await html5QrCode.start(
             constraints,
@@ -276,11 +311,8 @@ export default function QRScanner() {
         } catch (error) {
           console.error("카메라 전환 오류:", error);
 
-          // 안드로이드에서 exact 제약조건 실패 시 fallback 시도
-          if (
-            /Android/i.test(navigator.userAgent) &&
-            (error as Error).message?.includes("exact")
-          ) {
+          // 안드로이드에서 카메라 전환 실패 시 fallback 시도
+          if (/Android/i.test(navigator.userAgent)) {
             try {
               const fallbackConfig = {
                 fps: 8,
