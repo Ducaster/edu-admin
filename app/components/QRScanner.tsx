@@ -206,56 +206,8 @@ export default function QRScanner() {
       // 카메라 방향 전환
       const newFacing = cameraFacing === "user" ? "environment" : "user";
 
-      // 안드로이드에서 카메라 전환 전 권한 미리 확인 및 요청
-      if (/Android/i.test(navigator.userAgent)) {
-        try {
-          // 새로운 카메라에 대한 권한을 미리 요청
-          const testStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: newFacing },
-          });
-
-          // 테스트 스트림 즉시 종료
-          testStream.getTracks().forEach((track) => {
-            track.stop();
-          });
-
-          // 잠시 대기 (스트림 완전 해제를 위해)
-          await new Promise((resolve) => setTimeout(resolve, 200));
-        } catch (permissionError) {
-          console.error("카메라 권한 확인 실패:", permissionError);
-
-          // 권한 오류 유형에 따른 다른 처리
-          const error = permissionError as DOMException;
-          if (error.name === "NotAllowedError") {
-            toast.error(
-              "카메라 권한이 필요합니다. 브라우저 주소창의 🎥 아이콘을 클릭하고 '항상 허용'을 선택해주세요.",
-              {
-                autoClose: 8000,
-                toastId: "camera-permission-denied",
-              }
-            );
-          } else if (error.name === "NotFoundError") {
-            toast.warn(
-              "요청한 카메라를 찾을 수 없습니다. 다른 카메라가 사용 중일 수 있습니다.",
-              {
-                autoClose: 5000,
-                toastId: "camera-not-found",
-              }
-            );
-          } else {
-            toast.error(
-              "카메라 전환에 실패했습니다. 잠시 후 다시 시도해주세요.",
-              {
-                autoClose: 4000,
-                toastId: "camera-switch-failed",
-              }
-            );
-          }
-
-          setScanning(true); // 기존 상태 복원
-          return;
-        }
-      }
+      // 권한이 이미 허용된 경우 불필요한 권한 요청을 방지하기 위해
+      // 안드로이드에서도 바로 카메라 전환 시도
 
       // 카메라 장치 사용 가능성 확인 (안드로이드 호환성)
       try {
@@ -362,7 +314,29 @@ export default function QRScanner() {
               setCameraFacing(cameraFacing === "user" ? "environment" : "user"); // 원래 상태로 복원
             }
           } else {
-            toast.error("카메라 전환에 실패했습니다. 다시 시도해주세요.");
+            // 실제 카메라 전환 실패 시에만 에러 처리
+            const actualError = error as DOMException;
+            if (actualError.name === "NotAllowedError") {
+              toast.error(
+                "카메라 권한이 필요합니다. 브라우저 주소창의 🎥 아이콘을 클릭하고 '항상 허용'을 선택해주세요.",
+                {
+                  autoClose: 8000,
+                  toastId: "camera-permission-switch-denied",
+                }
+              );
+            } else if (actualError.name === "NotFoundError") {
+              toast.warn(
+                "요청한 카메라를 찾을 수 없습니다. 이 기기에 해당 카메라가 없을 수 있습니다.",
+                {
+                  autoClose: 5000,
+                  toastId: "camera-not-found-switch",
+                }
+              );
+            } else {
+              toast.error("카메라 전환에 실패했습니다. 다시 시도해주세요.", {
+                toastId: "camera-switch-general-error",
+              });
+            }
             setScanning(false);
             setCameraFacing(cameraFacing === "user" ? "environment" : "user"); // 원래 상태로 복원
           }
