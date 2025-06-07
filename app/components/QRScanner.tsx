@@ -123,6 +123,27 @@ export default function QRScanner() {
       return;
     }
 
+    // 안드로이드에서 앱 최초 시작 시 모든 카메라 권한 미리 요청
+    if (/Android/i.test(navigator.userAgent)) {
+      try {
+        // 현재 사용하지 않는 다른 카메라 권한도 미리 요청
+        const otherFacing = cameraFacing === "user" ? "environment" : "user";
+        try {
+          const otherStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: otherFacing },
+          });
+          otherStream.getTracks().forEach((track) => track.stop());
+        } catch (error) {
+          // 실패해도 계속 진행
+        }
+
+        // 권한 요청 완료 후 잠시 대기
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      } catch (error) {
+        // 실패해도 계속 진행
+      }
+    }
+
     try {
       setScanning(true);
       setQrLocation(null);
@@ -184,9 +205,73 @@ export default function QRScanner() {
 
       // 카메라 방향 전환
       const newFacing = cameraFacing === "user" ? "environment" : "user";
+
+      // 안드로이드에서 카메라 전환 전 권한 미리 확인 및 요청
+      if (/Android/i.test(navigator.userAgent)) {
+        try {
+          // 새로운 카메라에 대한 권한을 미리 요청
+          const testStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: newFacing },
+          });
+
+          // 테스트 스트림 즉시 종료
+          testStream.getTracks().forEach((track) => {
+            track.stop();
+          });
+
+          // 잠시 대기 (스트림 완전 해제를 위해)
+          await new Promise((resolve) => setTimeout(resolve, 200));
+        } catch (permissionError) {
+          console.error("카메라 권한 확인 실패:", permissionError);
+
+          // 안드로이드 특화 권한 안내 메시지
+          if (/Android/i.test(navigator.userAgent)) {
+            toast.error(
+              "카메라 전환을 위해 권한이 필요합니다. 브라우저 주소창의 카메라 아이콘을 클릭하고 '항상 허용'을 선택해주세요.",
+              { autoClose: 6000 }
+            );
+          } else {
+            toast.error(
+              "카메라 권한이 필요합니다. 브라우저에서 카메라 권한을 허용해주세요."
+            );
+          }
+
+          setScanning(true); // 기존 상태 복원
+          return;
+        }
+      }
+
+      // 카메라 장치 사용 가능성 확인 (안드로이드 호환성)
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(
+          (device) => device.kind === "videoinput"
+        );
+
+        const hasRequestedCamera = videoDevices.some(
+          (device) =>
+            (newFacing === "user" &&
+              device.label.toLowerCase().includes("front")) ||
+            (newFacing === "environment" &&
+              device.label.toLowerCase().includes("back")) ||
+            device.label.toLowerCase().includes(newFacing)
+        );
+
+        if (videoDevices.length < 2) {
+          toast.warn("이 기기에는 카메라가 하나만 있습니다.");
+          setScanning(true); // 기존 상태 복원
+          return;
+        }
+      } catch (error) {
+        console.warn("카메라 장치 확인 실패:", error);
+        // 에러가 나도 계속 진행 (일부 브라우저에서 권한 문제로 실패할 수 있음)
+      }
+
       setCameraFacing(newFacing);
 
-      // 잠시 대기 후 새로운 카메라로 시작
+      // 안드로이드에서 더 긴 대기 시간 필요
+      const delay = /Android/i.test(navigator.userAgent) ? 1000 : 500;
+
       setTimeout(async () => {
         try {
           setScanning(true);
@@ -202,8 +287,13 @@ export default function QRScanner() {
             },
           };
 
+          // 안드로이드에서 더 구체적인 제약조건 사용
+          const constraints = /Android/i.test(navigator.userAgent)
+            ? { facingMode: { exact: newFacing } }
+            : { facingMode: newFacing };
+
           await html5QrCode.start(
-            { facingMode: newFacing },
+            constraints,
             config,
             onScanSuccess,
             onScanFailure
@@ -217,12 +307,54 @@ export default function QRScanner() {
           );
         } catch (error) {
           console.error("카메라 전환 오류:", error);
-          toast.error("카메라 전환에 실패했습니다. 다시 시도해주세요.");
-          setScanning(false);
+
+          // 안드로이드에서 exact 제약조건 실패 시 fallback 시도
+          if (
+            /Android/i.test(navigator.userAgent) &&
+            (error as Error).message?.includes("exact")
+          ) {
+            try {
+              const fallbackConfig = {
+                fps: 8,
+                qrbox: undefined,
+                aspectRatio: 16 / 9,
+                disableFlip: false,
+                experimentalFeatures: {
+                  useBarCodeDetectorIfSupported: true,
+                },
+              };
+
+              await html5QrCode.start(
+                { facingMode: newFacing },
+                fallbackConfig,
+                onScanSuccess,
+                onScanFailure
+              );
+
+              toast.success(
+                newFacing === "user"
+                  ? "전면 카메라로 전환되었습니다"
+                  : "후면 카메라로 전환되었습니다",
+                { toastId: "camera-switch" }
+              );
+            } catch (fallbackError) {
+              console.error("Fallback 카메라 전환도 실패:", fallbackError);
+              toast.error(
+                "카메라 전환에 실패했습니다. 브라우저를 새로고침해보세요."
+              );
+              setScanning(false);
+              setCameraFacing(cameraFacing === "user" ? "environment" : "user"); // 원래 상태로 복원
+            }
+          } else {
+            toast.error("카메라 전환에 실패했습니다. 다시 시도해주세요.");
+            setScanning(false);
+            setCameraFacing(cameraFacing === "user" ? "environment" : "user"); // 원래 상태로 복원
+          }
         }
-      }, 500);
+      }, delay);
     } catch (error) {
       console.error("카메라 전환 준비 오류:", error);
+      toast.error("카메라 전환 준비 중 오류가 발생했습니다.");
     }
   };
 
@@ -231,43 +363,27 @@ export default function QRScanner() {
 
     // QR 인식 즉시 1초간 스캔 차단
     if (currentTime - lastGlobalScanTime < 1000) {
-      console.log(
-        `🚫🚫🚫 QR 인식 후 1초 차단: ${
-          currentTime - lastGlobalScanTime
-        }ms < 1000ms`
-      );
       return;
     }
 
     // QR 인식 즉시 전역 시간 업데이트 (연속 스캔 방지)
     lastGlobalScanTime = currentTime;
 
-    console.log(`=== QR 스캔 감지 ===`);
-    console.log(`스캔된 내용: ${decodedText}`);
-    console.log(`현재 시간: ${currentTime}`);
-    console.log(`마지막 스캔 시간: ${lastScanTime}`);
-    console.log(`처리 중 상태: ${isProcessing}`);
-
     // API 처리 중이면 무시
     if (isProcessing) {
-      console.log(`🚫 API 처리 중이므로 스캔 무시`);
       return;
     }
 
     // 중복 스캔 방지 (같은 내용을 3초 이내에 다시 스캔하는 것 방지)
     if (decodedText === lastScanned && currentTime - lastScanTime < 3000) {
-      console.log(`🚫 중복 QR 내용 방지: ${decodedText}`);
       return;
     }
-
-    console.log(`✅ 스캔 허용 - 처리 시작`);
 
     setLastScanTime(currentTime);
     setLastScanned(decodedText);
     setIsProcessing(true); // 처리 시작 플래그 설정
 
     // QR 코드 인식 시 강제로 하이라이트 효과 트리거
-    console.log("🎨 하이라이트 효과 트리거");
     setAnimateQR(true);
     setTimeout(() => {
       setAnimateQR(false);
@@ -275,17 +391,10 @@ export default function QRScanner() {
 
     // QR 코드 위치 정보 업데이트
     if (decodedResult.result.cornerPoints && scannerRef.current) {
-      console.log(
-        "🎯 QR 코드 위치 정보 감지:",
-        decodedResult.result.cornerPoints
-      );
-
       const { width, height } = scannerRef.current.getBoundingClientRect();
-      console.log("📐 스캐너 컨테이너 크기:", { width, height });
 
       // cornerPoints에서 QR 코드 위치 정보 계산
       const points = decodedResult.result.cornerPoints;
-      console.log("📍 원본 포인트:", points);
 
       // 간소화된 위치 정보 생성 (실제 코드에서는 cornerPoints 사용)
       const location: QRLocation = {
@@ -307,20 +416,11 @@ export default function QRScanner() {
         },
       };
 
-      console.log("📊 계산된 위치 (%):", location);
       setQrLocation(location);
-    } else {
-      console.log("❌ QR 코드 위치 정보 없음:", {
-        hasCornerPoints: !!decodedResult.result.cornerPoints,
-        hasScannerRef: !!scannerRef.current,
-        decodedResult: decodedResult,
-      });
     }
 
     try {
       // QR 코드에서 학생 번호 추출
-      console.log("스캔된 QR 코드 내용:", decodedText);
-
       let studentNumber: number;
 
       // 다양한 형태의 QR 코드 처리
@@ -372,8 +472,6 @@ export default function QRScanner() {
           const numberMatch = decodedText.match(/\d+/);
           if (numberMatch) {
             studentNumber = parseInt(numberMatch[0], 10);
-            // 자동 추출 시에는 토스트 알림 제거 (너무 빈번함)
-            console.log(`QR 코드에서 숫자를 추출했습니다: ${studentNumber}`);
           } else {
             toast.error(`QR 코드에서 숫자를 찾을 수 없습니다.`, {
               toastId: "no-number-found",
@@ -390,25 +488,14 @@ export default function QRScanner() {
         return;
       }
 
-      console.log("추출된 학생 번호:", studentNumber);
-
       // 같은 출석번호가 최근 5초 이내에 처리되었는지 확인
       if (
         lastProcessedNumber === studentNumber &&
         currentTime - lastProcessedTime < 5000
       ) {
-        console.log(
-          `🚫 출석번호 중복 방지: ${studentNumber} (${
-            currentTime - lastProcessedTime
-          }ms 전에 처리됨)`
-        );
         setIsProcessing(false); // 처리 완료 플래그 해제
         return;
       }
-
-      console.log(
-        `📡 API 호출 시작: 출석번호 ${studentNumber}, 회차 ${selectedSessionId}`
-      );
 
       // 출석 기록 API 호출
       const result = await api.recordAttendance(
@@ -416,14 +503,11 @@ export default function QRScanner() {
         selectedSessionId
       );
 
-      console.log(`📡 API 호출 완료:`, result);
-
       // 처리된 번호와 시간 업데이트 (성공/실패 관계없이)
       setLastProcessedNumber(studentNumber);
       setLastProcessedTime(currentTime);
 
       if (result.success) {
-        console.log(`✅ 출석 성공: ${studentNumber}`);
         toast.success("출석이 성공적으로 기록되었습니다.", {
           toastId: `success-${studentNumber}`,
           autoClose: 2000, // 토스트 표시 시간 단축
@@ -446,7 +530,6 @@ export default function QRScanner() {
         }, 2000);
       } else {
         if (result.isDuplicate) {
-          console.log(`🔄 중복 출석: ${studentNumber}`);
           // 중복 출석인 경우 특별한 알림만 표시 (히스토리에는 추가하지 않음)
           toast.info("오늘 이미 출석한 이력이 있습니다.", {
             icon: () => <span>🔄</span>,
@@ -455,11 +538,6 @@ export default function QRScanner() {
             autoClose: 1500, // 중복 출석 알림 시간 단축
           });
 
-          // 중복 출석은 히스토리에 추가하지 않음 (실제 출석 처리가 되지 않았으므로)
-          console.log(
-            `출석번호 ${studentNumber}: 중복 출석으로 히스토리에 추가하지 않음`
-          );
-
           // 중복 출석 후 충분한 대기 시간 (1.5초)
           setTimeout(() => {
             setLastScanned(null);
@@ -467,7 +545,6 @@ export default function QRScanner() {
             setIsProcessing(false); // 처리 완료 플래그 해제
           }, 1500);
         } else {
-          console.log(`❌ 출석 오류: ${studentNumber}`, result.error);
           // 기타 오류
           const errorMessage = result.error || "출석 기록에 실패했습니다.";
 
