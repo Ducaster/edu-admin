@@ -40,6 +40,13 @@ export default function QRScanner() {
   const [cameraFacing, setCameraFacing] = useState<"user" | "environment">(
     "user"
   ); // 카메라 방향 상태
+
+  // 카메라 장치 상태 관리
+  const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
+  const [frontCamera, setFrontCamera] = useState<string | null>(null);
+  const [backCamera, setBackCamera] = useState<string | null>(null);
+  const [cameraListLoaded, setCameraListLoaded] = useState(false);
+
   const scannerRef = useRef<HTMLDivElement>(null);
 
   // 교육 회차 목록 (1-1부터 22-3까지)
@@ -52,6 +59,72 @@ export default function QRScanner() {
       });
     }
   }
+
+  // 카메라 장치 목록 미리 불러오기
+  useEffect(() => {
+    const loadCameraDevices = async () => {
+      try {
+        // 먼저 기본 카메라 권한 요청
+        await navigator.mediaDevices.getUserMedia({ video: true });
+
+        // 카메라 장치 목록 가져오기
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoInputs = devices.filter(
+          (device) => device.kind === "videoinput"
+        );
+
+        setVideoDevices(videoInputs);
+
+        // 전면/후면 카메라 구분
+        let frontCameraId = null;
+        let backCameraId = null;
+
+        for (const device of videoInputs) {
+          const label = device.label.toLowerCase();
+
+          // 전면 카메라 감지
+          if (
+            label.includes("front") ||
+            label.includes("user") ||
+            label.includes("selfie") ||
+            label.includes("내부") ||
+            (label.includes("facetime") && !label.includes("back"))
+          ) {
+            frontCameraId = device.deviceId;
+          }
+          // 후면 카메라 감지
+          else if (
+            label.includes("back") ||
+            label.includes("rear") ||
+            label.includes("environment") ||
+            label.includes("외부") ||
+            label.includes("main")
+          ) {
+            backCameraId = device.deviceId;
+          }
+        }
+
+        // 첫 번째와 두 번째 카메라로 추정 (라벨로 구분 못한 경우)
+        if (!frontCameraId && !backCameraId && videoInputs.length >= 2) {
+          frontCameraId = videoInputs[0].deviceId;
+          backCameraId = videoInputs[1].deviceId;
+        } else if (!frontCameraId && videoInputs.length >= 1) {
+          frontCameraId = videoInputs[0].deviceId;
+        } else if (!backCameraId && videoInputs.length >= 1) {
+          backCameraId = videoInputs[0].deviceId;
+        }
+
+        setFrontCamera(frontCameraId);
+        setBackCamera(backCameraId);
+        setCameraListLoaded(true);
+      } catch (error) {
+        console.error("카메라 장치 로드 오류:", error);
+        setCameraListLoaded(true); // 오류가 있어도 로드 완료 처리
+      }
+    };
+
+    loadCameraDevices();
+  }, []);
 
   useEffect(() => {
     // 컴포넌트가 마운트될 때 QR 스캐너 초기화
@@ -117,38 +190,16 @@ export default function QRScanner() {
   };
 
   const startScanner = async () => {
+    // 카메라 목록이 로드될 때까지 대기
+    if (!cameraListLoaded) {
+      toast.info("카메라 장치를 불러오는 중입니다...");
+      return;
+    }
+
     // 먼저 카메라 권한 확인
     const hasPermission = await checkCameraPermission();
     if (!hasPermission) {
       return;
-    }
-
-    // 안드로이드에서 카메라 장치 및 권한 사전 확인
-    if (/Android/i.test(navigator.userAgent)) {
-      try {
-        // 사용 가능한 카메라 장치 확인
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(
-          (device) => device.kind === "videoinput"
-        );
-
-        if (videoDevices.length > 1) {
-          // 여러 카메라가 있을 때만 다른 카메라 권한 미리 요청
-          const otherFacing = cameraFacing === "user" ? "environment" : "user";
-          try {
-            const testStream = await navigator.mediaDevices.getUserMedia({
-              video: { facingMode: otherFacing },
-            });
-            testStream.getTracks().forEach((track) => track.stop());
-            // 안드로이드에서 스트림 해제 대기 시간 필요
-            await new Promise((resolve) => setTimeout(resolve, 500));
-          } catch (error) {
-            // 권한 거부되거나 카메라 없으면 계속 진행
-          }
-        }
-      } catch (error) {
-        // 장치 확인 실패해도 계속 진행
-      }
     }
 
     try {
@@ -166,8 +217,24 @@ export default function QRScanner() {
         },
       };
 
+      // deviceId 기반으로 카메라 선택
+      const targetDeviceId = cameraFacing === "user" ? frontCamera : backCamera;
+
+      let constraints;
+      if (targetDeviceId) {
+        // deviceId가 있으면 명시적으로 지정
+        constraints = {
+          deviceId: { exact: targetDeviceId },
+        };
+      } else {
+        // deviceId가 없으면 facingMode로 fallback
+        constraints = {
+          facingMode: cameraFacing,
+        };
+      }
+
       await html5QrCode.start(
-        { facingMode: cameraFacing },
+        constraints,
         config,
         onScanSuccess,
         onScanFailure
@@ -206,55 +273,23 @@ export default function QRScanner() {
   const switchCamera = async () => {
     if (!scanning) return;
 
+    // 전환할 카메라가 있는지 확인
+    const newFacing = cameraFacing === "user" ? "environment" : "user";
+    const targetDeviceId = newFacing === "user" ? frontCamera : backCamera;
+
+    if (!targetDeviceId) {
+      toast.warn("전환할 카메라를 찾을 수 없습니다.");
+      return;
+    }
+
     try {
       // 현재 스캐너 중지
       await stopScanner();
 
       // 카메라 방향 전환
-      const newFacing = cameraFacing === "user" ? "environment" : "user";
-
-      // 권한이 이미 허용된 경우 불필요한 권한 요청을 방지하기 위해
-      // 안드로이드에서도 바로 카메라 전환 시도
-
-      // 카메라 장치 사용 가능성 확인 및 안드로이드 특화 처리
-      let preferredDeviceId = null;
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(
-          (device) => device.kind === "videoinput"
-        );
-
-        if (videoDevices.length < 2) {
-          toast.warn("이 기기에는 카메라가 하나만 있습니다.");
-          setScanning(true); // 기존 상태 복원
-          return;
-        }
-
-        // 안드로이드에서 특정 카메라 장치 ID 찾기
-        if (/Android/i.test(navigator.userAgent)) {
-          const targetDevice = videoDevices.find((device) => {
-            const label = device.label.toLowerCase();
-            return (
-              (newFacing === "user" &&
-                (label.includes("front") || label.includes("user"))) ||
-              (newFacing === "environment" &&
-                (label.includes("back") ||
-                  label.includes("rear") ||
-                  label.includes("environment")))
-            );
-          });
-
-          if (targetDevice) {
-            preferredDeviceId = targetDevice.deviceId;
-          }
-        }
-      } catch (error) {
-        // 에러가 나도 계속 진행 (일부 브라우저에서 권한 문제로 실패할 수 있음)
-      }
-
       setCameraFacing(newFacing);
 
-      // 안드로이드에서 더 긴 대기 시간 필요
+      // 대기 시간 (카메라 해제 완료)
       const delay = /Android/i.test(navigator.userAgent) ? 1000 : 500;
 
       setTimeout(async () => {
@@ -272,28 +307,10 @@ export default function QRScanner() {
             },
           };
 
-          // 안드로이드에서 단계적 제약조건 적용
-          let constraints;
-          if (/Android/i.test(navigator.userAgent)) {
-            if (preferredDeviceId) {
-              // 안드로이드: 특정 장치 ID가 있으면 우선 사용
-              constraints = {
-                deviceId: { exact: preferredDeviceId },
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
-              };
-            } else {
-              // 장치 ID가 없으면 facingMode로 fallback
-              constraints = {
-                facingMode: { ideal: newFacing },
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
-              };
-            }
-          } else {
-            // iOS: 일반적인 제약조건 사용
-            constraints = { facingMode: newFacing };
-          }
+          // deviceId로 명시적 카메라 선택
+          const constraints = {
+            deviceId: { exact: targetDeviceId },
+          };
 
           await html5QrCode.start(
             constraints,
@@ -311,64 +328,34 @@ export default function QRScanner() {
         } catch (error) {
           console.error("카메라 전환 오류:", error);
 
-          // 안드로이드에서 카메라 전환 실패 시 fallback 시도
-          if (/Android/i.test(navigator.userAgent)) {
-            try {
-              const fallbackConfig = {
-                fps: 8,
-                qrbox: undefined,
-                aspectRatio: 16 / 9,
-                disableFlip: false,
-                experimentalFeatures: {
-                  useBarCodeDetectorIfSupported: true,
-                },
-              };
+          // fallback으로 facingMode 시도
+          try {
+            const fallbackConfig = {
+              fps: 8,
+              qrbox: undefined,
+              aspectRatio: 16 / 9,
+              disableFlip: false,
+              experimentalFeatures: {
+                useBarCodeDetectorIfSupported: true,
+              },
+            };
 
-              await html5QrCode.start(
-                { facingMode: newFacing },
-                fallbackConfig,
-                onScanSuccess,
-                onScanFailure
-              );
+            await html5QrCode.start(
+              { facingMode: newFacing },
+              fallbackConfig,
+              onScanSuccess,
+              onScanFailure
+            );
 
-              toast.success(
-                newFacing === "user"
-                  ? "전면 카메라로 전환되었습니다"
-                  : "후면 카메라로 전환되었습니다",
-                { toastId: "camera-switch" }
-              );
-            } catch (fallbackError) {
-              console.error("Fallback 카메라 전환도 실패:", fallbackError);
-              toast.error(
-                "카메라 전환에 실패했습니다. 브라우저를 새로고침해보세요."
-              );
-              setScanning(false);
-              setCameraFacing(cameraFacing === "user" ? "environment" : "user"); // 원래 상태로 복원
-            }
-          } else {
-            // 실제 카메라 전환 실패 시에만 에러 처리
-            const actualError = error as DOMException;
-            if (actualError.name === "NotAllowedError") {
-              toast.error(
-                "카메라 권한이 필요합니다. 브라우저 주소창의 🎥 아이콘을 클릭하고 '항상 허용'을 선택해주세요.",
-                {
-                  autoClose: 8000,
-                  toastId: "camera-permission-switch-denied",
-                }
-              );
-            } else if (actualError.name === "NotFoundError") {
-              toast.warn(
-                "요청한 카메라를 찾을 수 없습니다. 이 기기에 해당 카메라가 없을 수 있습니다.",
-                {
-                  autoClose: 5000,
-                  toastId: "camera-not-found-switch",
-                }
-              );
-            } else {
-              toast.error("카메라 전환에 실패했습니다. 다시 시도해주세요.", {
-                toastId: "camera-switch-general-error",
-              });
-            }
+            toast.success(
+              newFacing === "user"
+                ? "전면 카메라로 전환되었습니다"
+                : "후면 카메라로 전환되었습니다",
+              { toastId: "camera-switch" }
+            );
+          } catch (fallbackError) {
+            console.error("Fallback 카메라 전환도 실패:", fallbackError);
+            toast.error("카메라 전환에 실패했습니다. 다시 시도해주세요.");
             setScanning(false);
             setCameraFacing(cameraFacing === "user" ? "environment" : "user"); // 원래 상태로 복원
           }
