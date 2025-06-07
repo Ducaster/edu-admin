@@ -224,15 +224,31 @@ export default function QRScanner() {
         } catch (permissionError) {
           console.error("카메라 권한 확인 실패:", permissionError);
 
-          // 안드로이드 특화 권한 안내 메시지
-          if (/Android/i.test(navigator.userAgent)) {
+          // 권한 오류 유형에 따른 다른 처리
+          const error = permissionError as DOMException;
+          if (error.name === "NotAllowedError") {
             toast.error(
-              "카메라 전환을 위해 권한이 필요합니다. 브라우저 주소창의 카메라 아이콘을 클릭하고 '항상 허용'을 선택해주세요.",
-              { autoClose: 6000 }
+              "카메라 권한이 필요합니다. 브라우저 주소창의 🎥 아이콘을 클릭하고 '항상 허용'을 선택해주세요.",
+              {
+                autoClose: 8000,
+                toastId: "camera-permission-denied",
+              }
+            );
+          } else if (error.name === "NotFoundError") {
+            toast.warn(
+              "요청한 카메라를 찾을 수 없습니다. 다른 카메라가 사용 중일 수 있습니다.",
+              {
+                autoClose: 5000,
+                toastId: "camera-not-found",
+              }
             );
           } else {
             toast.error(
-              "카메라 권한이 필요합니다. 브라우저에서 카메라 권한을 허용해주세요."
+              "카메라 전환에 실패했습니다. 잠시 후 다시 시도해주세요.",
+              {
+                autoClose: 4000,
+                toastId: "camera-switch-failed",
+              }
             );
           }
 
