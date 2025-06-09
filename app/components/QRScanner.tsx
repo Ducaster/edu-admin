@@ -242,14 +242,28 @@ export default function QRScanner() {
       // 시도할 제약 조건들 (우선순위 순) - 초점 개선 포함
       const constraintAttempts = [];
 
-      // 모바일용 고품질 설정 (초점 개선)
+      // 모바일용 고품질 설정 (초점 개선) - 더 유연한 제약조건
       const mobileConstraints = {
-        width: { ideal: 1920, max: 1920 },
-        height: { ideal: 1080, max: 1080 },
-        frameRate: { ideal: 30, max: 30 },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        frameRate: { ideal: 30 },
       };
 
-      // 1. deviceId exact + 모바일 최적화
+      // 1. deviceId exact (기본 - 가장 안정적)
+      if (targetDeviceId) {
+        constraintAttempts.push({
+          name: "deviceId exact",
+          constraints: { deviceId: { exact: targetDeviceId } },
+        });
+      }
+
+      // 2. facingMode exact (기본 - 가장 안정적)
+      constraintAttempts.push({
+        name: "facingMode exact",
+        constraints: { facingMode: { exact: cameraFacing } },
+      });
+
+      // 3. deviceId exact + 모바일 최적화 (성능 향상 시도)
       if (targetDeviceId) {
         constraintAttempts.push({
           name: "deviceId exact + mobile optimized",
@@ -260,27 +274,13 @@ export default function QRScanner() {
         });
       }
 
-      // 2. deviceId exact (기본)
-      if (targetDeviceId) {
-        constraintAttempts.push({
-          name: "deviceId exact",
-          constraints: { deviceId: { exact: targetDeviceId } },
-        });
-      }
-
-      // 3. facingMode exact + 모바일 최적화
+      // 4. facingMode exact + 모바일 최적화 (성능 향상 시도)
       constraintAttempts.push({
         name: "facingMode exact + mobile optimized",
         constraints: {
           facingMode: { exact: cameraFacing },
           ...mobileConstraints,
         },
-      });
-
-      // 4. facingMode exact (기본)
-      constraintAttempts.push({
-        name: "facingMode exact",
-        constraints: { facingMode: { exact: cameraFacing } },
       });
 
       // 5. deviceId ideal (유연한 방식)
