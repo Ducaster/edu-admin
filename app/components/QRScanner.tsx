@@ -60,35 +60,50 @@ export default function QRScanner() {
     }
   }
 
-  // 카메라 장치 목록 미리 불러오기
+  // 카메라 장치 목록 미리 불러오기 (안전한 방식)
   useEffect(() => {
     const loadCameraDevices = async () => {
       try {
-        // 먼저 기본 카메라 권한 요청
-        await navigator.mediaDevices.getUserMedia({ video: true });
-
-        // 카메라 장치 목록 가져오기
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoInputs = devices.filter(
+        // 권한 없이도 기본 장치 목록 시도
+        let devices = await navigator.mediaDevices.enumerateDevices();
+        let videoInputs = devices.filter(
           (device) => device.kind === "videoinput"
         );
 
+        // 권한 없으면 라벨이 비어있을 수 있으므로 권한 요청 후 다시 시도
+        if (videoInputs.length > 0 && !videoInputs[0].label) {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+              video: true,
+            });
+            stream.getTracks().forEach((track) => track.stop());
+            // 권한 후 다시 장치 목록 가져오기
+            devices = await navigator.mediaDevices.enumerateDevices();
+            videoInputs = devices.filter(
+              (device) => device.kind === "videoinput"
+            );
+          } catch (permError) {
+            // 권한 거부되어도 계속 진행
+          }
+        }
+
         setVideoDevices(videoInputs);
 
-        // 전면/후면 카메라 구분
+        // 전면/후면 카메라 구분 (더 관대한 방식)
         let frontCameraId = null;
         let backCameraId = null;
 
         for (const device of videoInputs) {
           const label = device.label.toLowerCase();
 
-          // 전면 카메라 감지
+          // 전면 카메라 감지 (더 많은 키워드)
           if (
             label.includes("front") ||
             label.includes("user") ||
             label.includes("selfie") ||
             label.includes("내부") ||
-            (label.includes("facetime") && !label.includes("back"))
+            label.includes("facetime") ||
+            label.includes("face")
           ) {
             frontCameraId = device.deviceId;
           }
@@ -98,28 +113,34 @@ export default function QRScanner() {
             label.includes("rear") ||
             label.includes("environment") ||
             label.includes("외부") ||
-            label.includes("main")
+            label.includes("main") ||
+            label.includes("camera 0") ||
+            (!label.includes("front") && !label.includes("user"))
           ) {
             backCameraId = device.deviceId;
           }
         }
 
-        // 첫 번째와 두 번째 카메라로 추정 (라벨로 구분 못한 경우)
-        if (!frontCameraId && !backCameraId && videoInputs.length >= 2) {
-          frontCameraId = videoInputs[0].deviceId;
-          backCameraId = videoInputs[1].deviceId;
-        } else if (!frontCameraId && videoInputs.length >= 1) {
-          frontCameraId = videoInputs[0].deviceId;
-        } else if (!backCameraId && videoInputs.length >= 1) {
-          backCameraId = videoInputs[0].deviceId;
+        // 기본값 설정 (라벨로 구분 못한 경우)
+        if (videoInputs.length >= 2) {
+          if (!frontCameraId) frontCameraId = videoInputs[0].deviceId;
+          if (!backCameraId) backCameraId = videoInputs[1].deviceId;
+        } else if (videoInputs.length >= 1) {
+          if (!frontCameraId && !backCameraId) {
+            // 카메라가 하나뿐이면 둘 다 같은 것으로 설정
+            frontCameraId = backCameraId = videoInputs[0].deviceId;
+          }
         }
 
         setFrontCamera(frontCameraId);
         setBackCamera(backCameraId);
-        setCameraListLoaded(true);
       } catch (error) {
         console.error("카메라 장치 로드 오류:", error);
-        setCameraListLoaded(true); // 오류가 있어도 로드 완료 처리
+        // 오류 시에도 기본 동작할 수 있도록
+        setFrontCamera(null);
+        setBackCamera(null);
+      } finally {
+        setCameraListLoaded(true);
       }
     };
 
@@ -196,20 +217,14 @@ export default function QRScanner() {
       return;
     }
 
-    // 먼저 카메라 권한 확인
-    const hasPermission = await checkCameraPermission();
-    if (!hasPermission) {
-      return;
-    }
-
     try {
       setScanning(true);
       setQrLocation(null);
 
-      // 텔레그램 스타일 스캐너 설정 - 전체 화면에서 QR 코드 인식
+      // 텔레그램 스타일 스캐너 설정
       const config = {
-        fps: 8, // FPS를 8로 감소 (더 안정적인 스캔)
-        qrbox: undefined, // qrbox를 지정하지 않아 전체 화면에서 QR코드 감지
+        fps: 8,
+        qrbox: undefined,
         aspectRatio: 16 / 9,
         disableFlip: false,
         experimentalFeatures: {
@@ -217,36 +232,103 @@ export default function QRScanner() {
         },
       };
 
-      // deviceId 기반으로 카메라 선택
+      // 단계적 fallback 시스템으로 카메라 시작 시도
       const targetDeviceId = cameraFacing === "user" ? frontCamera : backCamera;
 
-      let constraints;
+      // 시도할 제약 조건들 (우선순위 순)
+      const constraintAttempts = [];
+
+      // 1. deviceId exact (가장 정확한 방식)
       if (targetDeviceId) {
-        // deviceId가 있으면 명시적으로 지정
-        constraints = {
-          deviceId: { exact: targetDeviceId },
-        };
-      } else {
-        // deviceId가 없으면 facingMode로 fallback
-        constraints = {
-          facingMode: cameraFacing,
-        };
+        constraintAttempts.push({
+          name: "deviceId exact",
+          constraints: { deviceId: { exact: targetDeviceId } },
+        });
       }
 
-      await html5QrCode.start(
-        constraints,
-        config,
-        onScanSuccess,
-        onScanFailure
-      );
+      // 2. deviceId ideal (좀 더 유연한 방식)
+      if (targetDeviceId) {
+        constraintAttempts.push({
+          name: "deviceId ideal",
+          constraints: { deviceId: { ideal: targetDeviceId } },
+        });
+      }
+
+      // 3. facingMode exact (정확한 facing)
+      constraintAttempts.push({
+        name: "facingMode exact",
+        constraints: { facingMode: { exact: cameraFacing } },
+      });
+
+      // 4. facingMode ideal (유연한 facing)
+      constraintAttempts.push({
+        name: "facingMode ideal",
+        constraints: { facingMode: { ideal: cameraFacing } },
+      });
+
+      // 5. facingMode 기본 (가장 기본적인 방식)
+      constraintAttempts.push({
+        name: "facingMode basic",
+        constraints: { facingMode: cameraFacing },
+      });
+
+      // 6. 마지막 fallback (기본 비디오만)
+      constraintAttempts.push({
+        name: "basic video",
+        constraints: { video: true },
+      });
+
+      let lastError = null;
+      let success = false;
+
+      // 각 제약 조건을 순차적으로 시도
+      for (const attempt of constraintAttempts) {
+        try {
+          await html5QrCode.start(
+            attempt.constraints,
+            config,
+            onScanSuccess,
+            onScanFailure
+          );
+          success = true;
+          break; // 성공하면 중단
+        } catch (error) {
+          lastError = error;
+          console.warn(`${attempt.name} 방식 실패:`, error);
+
+          // 스캐너가 이미 시작된 상태라면 중지하고 다음 시도
+          if (html5QrCode?.isScanning) {
+            try {
+              await html5QrCode.stop();
+            } catch (stopError) {
+              console.warn("스캐너 중지 실패:", stopError);
+            }
+          }
+
+          // 짧은 대기 후 다음 시도
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      }
+
+      if (!success) {
+        throw lastError || new Error("모든 카메라 시작 방식이 실패했습니다.");
+      }
     } catch (error) {
       console.error("QR 스캐너 시작 오류:", error);
 
-      if (error instanceof DOMException && error.name === "NotAllowedError") {
-        toast.error(
-          "카메라 접근 권한이 거부되었습니다. 브라우저 설정에서 카메라 권한을 허용해주세요."
-        );
-        setPermissionError(true);
+      if (error instanceof DOMException) {
+        if (error.name === "NotAllowedError") {
+          toast.error(
+            "카메라 접근 권한이 거부되었습니다. 브라우저 설정에서 카메라 권한을 허용해주세요."
+          );
+          setPermissionError(true);
+        } else if (error.name === "NotFoundError") {
+          toast.error(
+            "카메라를 찾을 수 없습니다. 카메라가 연결되어 있는지 확인해주세요."
+          );
+        } else {
+          toast.error(`카메라 오류: ${error.message}`);
+        }
       } else {
         toast.error(
           "QR 스캐너를 시작할 수 없습니다. 새로고침 후 다시 시도해주세요."
@@ -269,16 +351,16 @@ export default function QRScanner() {
     }
   };
 
-  // 카메라 전환 함수
+  // 카메라 전환 함수 (단계적 fallback 시스템)
   const switchCamera = async () => {
     if (!scanning) return;
 
-    // 전환할 카메라가 있는지 확인
     const newFacing = cameraFacing === "user" ? "environment" : "user";
     const targetDeviceId = newFacing === "user" ? frontCamera : backCamera;
 
-    if (!targetDeviceId) {
-      toast.warn("전환할 카메라를 찾을 수 없습니다.");
+    // 하나의 카메라만 있는 경우
+    if (videoDevices.length < 2) {
+      toast.warn("이 기기에는 카메라가 하나만 있습니다.");
       return;
     }
 
@@ -307,58 +389,91 @@ export default function QRScanner() {
             },
           };
 
-          // deviceId로 명시적 카메라 선택
-          const constraints = {
-            deviceId: { exact: targetDeviceId },
-          };
+          // 카메라 전환용 단계적 시도
+          const switchAttempts = [];
 
-          await html5QrCode.start(
-            constraints,
-            config,
-            onScanSuccess,
-            onScanFailure
-          );
+          // 1. deviceId exact
+          if (targetDeviceId) {
+            switchAttempts.push({
+              name: "deviceId exact",
+              constraints: { deviceId: { exact: targetDeviceId } },
+            });
+          }
 
-          toast.success(
-            newFacing === "user"
-              ? "전면 카메라로 전환되었습니다"
-              : "후면 카메라로 전환되었습니다",
-            { toastId: "camera-switch" }
-          );
-        } catch (error) {
-          console.error("카메라 전환 오류:", error);
+          // 2. deviceId ideal
+          if (targetDeviceId) {
+            switchAttempts.push({
+              name: "deviceId ideal",
+              constraints: { deviceId: { ideal: targetDeviceId } },
+            });
+          }
 
-          // fallback으로 facingMode 시도
-          try {
-            const fallbackConfig = {
-              fps: 8,
-              qrbox: undefined,
-              aspectRatio: 16 / 9,
-              disableFlip: false,
-              experimentalFeatures: {
-                useBarCodeDetectorIfSupported: true,
-              },
-            };
+          // 3. facingMode exact
+          switchAttempts.push({
+            name: "facingMode exact",
+            constraints: { facingMode: { exact: newFacing } },
+          });
 
-            await html5QrCode.start(
-              { facingMode: newFacing },
-              fallbackConfig,
-              onScanSuccess,
-              onScanFailure
-            );
+          // 4. facingMode ideal
+          switchAttempts.push({
+            name: "facingMode ideal",
+            constraints: { facingMode: { ideal: newFacing } },
+          });
 
+          // 5. facingMode basic
+          switchAttempts.push({
+            name: "facingMode basic",
+            constraints: { facingMode: newFacing },
+          });
+
+          let switchSuccess = false;
+          let lastSwitchError = null;
+
+          // 각 방식을 순차적으로 시도
+          for (const attempt of switchAttempts) {
+            try {
+              await html5QrCode.start(
+                attempt.constraints,
+                config,
+                onScanSuccess,
+                onScanFailure
+              );
+              switchSuccess = true;
+              break;
+            } catch (error) {
+              lastSwitchError = error;
+              console.warn(`카메라 전환 ${attempt.name} 실패:`, error);
+
+              if (html5QrCode?.isScanning) {
+                try {
+                  await html5QrCode.stop();
+                } catch (stopError) {
+                  console.warn("전환 중 스캐너 중지 실패:", stopError);
+                }
+              }
+
+              await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+          }
+
+          if (switchSuccess) {
             toast.success(
               newFacing === "user"
                 ? "전면 카메라로 전환되었습니다"
                 : "후면 카메라로 전환되었습니다",
               { toastId: "camera-switch" }
             );
-          } catch (fallbackError) {
-            console.error("Fallback 카메라 전환도 실패:", fallbackError);
-            toast.error("카메라 전환에 실패했습니다. 다시 시도해주세요.");
-            setScanning(false);
-            setCameraFacing(cameraFacing === "user" ? "environment" : "user"); // 원래 상태로 복원
+          } else {
+            throw (
+              lastSwitchError ||
+              new Error("모든 카메라 전환 방식이 실패했습니다.")
+            );
           }
+        } catch (error) {
+          console.error("카메라 전환 오류:", error);
+          toast.error("카메라 전환에 실패했습니다. 다시 시도해주세요.");
+          setScanning(false);
+          setCameraFacing(cameraFacing === "user" ? "environment" : "user"); // 원래 상태로 복원
         }
       }, delay);
     } catch (error) {
