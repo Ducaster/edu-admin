@@ -46,8 +46,12 @@ export default function QRScanner() {
   const [frontCamera, setFrontCamera] = useState<string | null>(null);
   const [backCamera, setBackCamera] = useState<string | null>(null);
   const [cameraListLoaded, setCameraListLoaded] = useState(false);
+  const [focusPoint, setFocusPoint] = useState<{ x: number; y: number } | null>(
+    null
+  );
 
   const scannerRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   // 교육 회차 목록 (1-1부터 22-3까지)
   const sessionOptions: Array<{ value: string; label: string }> = [];
@@ -235,10 +239,28 @@ export default function QRScanner() {
       // 단계적 fallback 시스템으로 카메라 시작 시도
       const targetDeviceId = cameraFacing === "user" ? frontCamera : backCamera;
 
-      // 시도할 제약 조건들 (우선순위 순)
+      // 시도할 제약 조건들 (우선순위 순) - 초점 개선 포함
       const constraintAttempts = [];
 
-      // 1. deviceId exact (가장 정확한 방식)
+      // 모바일용 고품질 설정 (초점 개선)
+      const mobileConstraints = {
+        width: { ideal: 1920, max: 1920 },
+        height: { ideal: 1080, max: 1080 },
+        frameRate: { ideal: 30, max: 30 },
+      };
+
+      // 1. deviceId exact + 모바일 최적화
+      if (targetDeviceId) {
+        constraintAttempts.push({
+          name: "deviceId exact + mobile optimized",
+          constraints: {
+            deviceId: { exact: targetDeviceId },
+            ...mobileConstraints,
+          },
+        });
+      }
+
+      // 2. deviceId exact (기본)
       if (targetDeviceId) {
         constraintAttempts.push({
           name: "deviceId exact",
@@ -246,7 +268,22 @@ export default function QRScanner() {
         });
       }
 
-      // 2. deviceId ideal (좀 더 유연한 방식)
+      // 3. facingMode exact + 모바일 최적화
+      constraintAttempts.push({
+        name: "facingMode exact + mobile optimized",
+        constraints: {
+          facingMode: { exact: cameraFacing },
+          ...mobileConstraints,
+        },
+      });
+
+      // 4. facingMode exact (기본)
+      constraintAttempts.push({
+        name: "facingMode exact",
+        constraints: { facingMode: { exact: cameraFacing } },
+      });
+
+      // 5. deviceId ideal (유연한 방식)
       if (targetDeviceId) {
         constraintAttempts.push({
           name: "deviceId ideal",
@@ -254,25 +291,19 @@ export default function QRScanner() {
         });
       }
 
-      // 3. facingMode exact (정확한 facing)
-      constraintAttempts.push({
-        name: "facingMode exact",
-        constraints: { facingMode: { exact: cameraFacing } },
-      });
-
-      // 4. facingMode ideal (유연한 facing)
+      // 6. facingMode ideal (유연한 facing)
       constraintAttempts.push({
         name: "facingMode ideal",
         constraints: { facingMode: { ideal: cameraFacing } },
       });
 
-      // 5. facingMode 기본 (가장 기본적인 방식)
+      // 7. facingMode 기본 (가장 기본적인 방식)
       constraintAttempts.push({
         name: "facingMode basic",
         constraints: { facingMode: cameraFacing },
       });
 
-      // 6. 마지막 fallback (기본 비디오만)
+      // 8. 마지막 fallback (기본 비디오만)
       constraintAttempts.push({
         name: "basic video",
         constraints: { video: true },
@@ -346,8 +377,60 @@ export default function QRScanner() {
       }
       setScanning(false);
       setQrLocation(null);
+      setFocusPoint(null);
     } catch (error) {
       console.error("QR 스캐너 종료 오류:", error);
+    }
+  };
+
+  // 터치로 포커스 맞추기
+  const handleCameraTouch = async (event: React.TouchEvent) => {
+    if (!scanning) return;
+
+    event.preventDefault();
+    const touch = event.touches[0];
+    const rect = event.currentTarget.getBoundingClientRect();
+
+    // 터치 좌표를 상대 좌표로 변환
+    const x = ((touch.clientX - rect.left) / rect.width) * 100;
+    const y = ((touch.clientY - rect.top) / rect.height) * 100;
+
+    setFocusPoint({ x, y });
+
+    // 포커스 표시 1초 후 사라짐
+    setTimeout(() => setFocusPoint(null), 1000);
+
+    try {
+      // MediaStream에서 video track 가져오기
+      const videoElement = document.querySelector(
+        "#qr-reader video"
+      ) as HTMLVideoElement;
+      if (videoElement && videoElement.srcObject) {
+        const stream = videoElement.srcObject as MediaStream;
+        const videoTrack = stream.getVideoTracks()[0];
+
+        // 포커스 기능이 지원되는지 확인 (안전한 타입 체크)
+        const capabilities = videoTrack.getCapabilities() as any;
+        if (capabilities.focusMode) {
+          try {
+            // continuous 포커스 시도
+            await videoTrack.applyConstraints({
+              advanced: [{ focusMode: "continuous" }] as any,
+            });
+
+            toast.success("🎯 포커스를 조정했습니다", {
+              autoClose: 1000,
+              toastId: "focus-adjusted",
+            });
+          } catch (focusError) {
+            // 포커스 설정 실패 시 무시
+            console.warn("포커스 모드 설정 실패:", focusError);
+          }
+        }
+      }
+    } catch (error) {
+      console.warn("포커스 조정 실패:", error);
+      // 실패해도 토스트는 표시하지 않음 (사용자 경험 방해 방지)
     }
   };
 
@@ -809,6 +892,7 @@ export default function QRScanner() {
                 id="qr-container"
                 ref={scannerRef}
                 className="w-full bg-gray-900 relative overflow-hidden rounded-lg lg:rounded-xl shadow-lg"
+                onTouchStart={handleCameraTouch}
                 style={{
                   aspectRatio: "16/9",
                   minHeight: "200px",
@@ -840,6 +924,26 @@ export default function QRScanner() {
                       <div className="bg-black bg-opacity-60 text-white px-4 py-2 rounded-full text-center">
                         QR 코드를 화면에 비춰주세요
                       </div>
+                    </div>
+
+                    {/* 터치 포커스 표시 */}
+                    {focusPoint && (
+                      <div
+                        className="absolute w-16 h-16 border-2 border-yellow-400 rounded-full pointer-events-none z-30 animate-ping"
+                        style={{
+                          left: `${focusPoint.x}%`,
+                          top: `${focusPoint.y}%`,
+                          transform: "translate(-50%, -50%)",
+                        }}
+                      >
+                        <div className="absolute inset-0 w-full h-full border-2 border-yellow-400 rounded-full animate-pulse"></div>
+                        <div className="absolute top-1/2 left-1/2 w-2 h-2 bg-yellow-400 rounded-full transform -translate-x-1/2 -translate-y-1/2"></div>
+                      </div>
+                    )}
+
+                    {/* 포커스 안내 텍스트 (모바일만) */}
+                    <div className="absolute bottom-2 left-2 sm:hidden text-white text-xs bg-black bg-opacity-50 px-2 py-1 rounded pointer-events-none z-20">
+                      📱 화면을 터치하여 포커스 조정
                     </div>
 
                     {/* 스캔 애니메이션 - 화면 모서리에 움직이는 선 */}
