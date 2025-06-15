@@ -454,8 +454,13 @@ export default function QRScanner() {
       // 카메라 방향 전환
       setCameraFacing(newFacing);
 
+      // iPad 감지
+      const isIPad =
+        /iPad/.test(navigator.userAgent) ||
+        (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
       // 대기 시간 (카메라 해제 완료)
-      const delay = /Android/i.test(navigator.userAgent) ? 1000 : 500;
+      const delay = isIPad ? 1500 : 500;
 
       setTimeout(async () => {
         try {
@@ -475,39 +480,67 @@ export default function QRScanner() {
           // 카메라 전환용 단계적 시도
           const switchAttempts = [];
 
-          // 1. deviceId exact
-          if (targetDeviceId) {
+          if (isIPad) {
+            // iPad 전용 전환 로직
+            if (targetDeviceId) {
+              // 1. deviceId exact + 기본 설정
+              switchAttempts.push({
+                name: "iPad deviceId exact",
+                constraints: {
+                  deviceId: { exact: targetDeviceId },
+                  width: { ideal: 1280 },
+                  height: { ideal: 720 },
+                  frameRate: { ideal: 30 },
+                },
+              });
+
+              // 2. deviceId exact + 최소 설정
+              switchAttempts.push({
+                name: "iPad deviceId exact minimal",
+                constraints: {
+                  deviceId: { exact: targetDeviceId },
+                  width: { min: 640 },
+                  height: { min: 480 },
+                },
+              });
+
+              // 3. deviceId ideal
+              switchAttempts.push({
+                name: "iPad deviceId ideal",
+                constraints: {
+                  deviceId: { ideal: targetDeviceId },
+                  width: { ideal: 1280 },
+                  height: { ideal: 720 },
+                },
+              });
+            }
+          } else {
+            // 다른 기기용 기존 전환 로직
+            if (targetDeviceId) {
+              switchAttempts.push({
+                name: "deviceId exact",
+                constraints: { deviceId: { exact: targetDeviceId } },
+              });
+            }
+            if (targetDeviceId) {
+              switchAttempts.push({
+                name: "deviceId ideal",
+                constraints: { deviceId: { ideal: targetDeviceId } },
+              });
+            }
             switchAttempts.push({
-              name: "deviceId exact",
-              constraints: { deviceId: { exact: targetDeviceId } },
+              name: "facingMode exact",
+              constraints: { facingMode: { exact: newFacing } },
+            });
+            switchAttempts.push({
+              name: "facingMode ideal",
+              constraints: { facingMode: { ideal: newFacing } },
+            });
+            switchAttempts.push({
+              name: "facingMode basic",
+              constraints: { facingMode: newFacing },
             });
           }
-
-          // 2. deviceId ideal
-          if (targetDeviceId) {
-            switchAttempts.push({
-              name: "deviceId ideal",
-              constraints: { deviceId: { ideal: targetDeviceId } },
-            });
-          }
-
-          // 3. facingMode exact
-          switchAttempts.push({
-            name: "facingMode exact",
-            constraints: { facingMode: { exact: newFacing } },
-          });
-
-          // 4. facingMode ideal
-          switchAttempts.push({
-            name: "facingMode ideal",
-            constraints: { facingMode: { ideal: newFacing } },
-          });
-
-          // 5. facingMode basic
-          switchAttempts.push({
-            name: "facingMode basic",
-            constraints: { facingMode: newFacing },
-          });
 
           let switchSuccess = false;
           let lastSwitchError = null;
@@ -535,7 +568,10 @@ export default function QRScanner() {
                 }
               }
 
-              await new Promise((resolve) => setTimeout(resolve, 100));
+              // iPad에서는 더 긴 대기 시간 적용
+              await new Promise((resolve) =>
+                setTimeout(resolve, isIPad ? 200 : 100)
+              );
             }
           }
 
