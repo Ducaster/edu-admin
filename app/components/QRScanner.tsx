@@ -16,9 +16,17 @@ interface QRLocation {
   bottomRight: { x: number; y: number };
 }
 
-export default function QRScanner() {
+interface QRScannerProps {
+  setActiveTab?: (tab: string) => void;
+  onVerticalChange?: (isVertical: boolean) => void;
+}
+
+export default function QRScanner({
+  setActiveTab,
+  onVerticalChange,
+}: QRScannerProps) {
   const [scanning, setScanning] = useState(false);
-  const [selectedSessionId, setSelectedSessionId] = useState<string>("1-1"); // 기본값 설정
+  const [selectedSessionId, setSelectedSessionId] = useState<string>(""); // 기본값 없음
   const [lastScanned, setLastScanned] = useState<string | null>(null);
   const [lastScanTime, setLastScanTime] = useState<number>(0);
   const [lastProcessedNumber, setLastProcessedNumber] = useState<number | null>(
@@ -52,6 +60,9 @@ export default function QRScanner() {
 
   const scannerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const scannerSectionRef = useRef<HTMLDivElement>(null);
+  const recordSectionRef = useRef<HTMLDivElement>(null);
+  const [isVertical, setIsVertical] = useState(false);
 
   // 교육 회차 목록 (1-1부터 22-3까지)
   const sessionOptions: Array<{ value: string; label: string }> = [];
@@ -63,6 +74,9 @@ export default function QRScanner() {
       });
     }
   }
+
+  // 회차 미선택 경고 모달 상태
+  const [showSessionAlert, setShowSessionAlert] = useState(false);
 
   // 카메라 장치 목록 미리 불러오기 (안전한 방식)
   useEffect(() => {
@@ -215,6 +229,11 @@ export default function QRScanner() {
   };
 
   const startScanner = async () => {
+    if (!selectedSessionId) {
+      setShowSessionAlert(true);
+      return;
+    }
+
     // 카메라 목록이 로드될 때까지 대기
     if (!cameraListLoaded) {
       toast.info("카메라 장치를 불러오는 중입니다...");
@@ -895,43 +914,51 @@ export default function QRScanner() {
     };
   };
 
+  useEffect(() => {
+    function checkVertical() {
+      if (!scannerSectionRef.current || !recordSectionRef.current) return;
+      const scannerRect = scannerSectionRef.current.getBoundingClientRect();
+      const recordRect = recordSectionRef.current.getBoundingClientRect();
+      const vertical = recordRect.top - scannerRect.bottom > 20;
+      setIsVertical(vertical);
+      if (onVerticalChange) onVerticalChange(vertical);
+    }
+    checkVertical();
+    window.addEventListener("resize", checkVertical);
+    return () => window.removeEventListener("resize", checkVertical);
+  }, [onVerticalChange]);
+
   return (
     <div className="w-full h-screen bg-gray-50 overflow-hidden">
       <div className="w-full h-full">
         {/* 메인 컨텐츠 */}
         <div className="flex flex-col lg:flex-row gap-0 h-full">
           {/* 왼쪽: QR 스캐너 */}
-          <div className="flex-1 lg:flex-[3]">
+          <div className="flex-1 lg:flex-[3]" ref={scannerSectionRef}>
             <div className="bg-white shadow-xl p-2 sm:p-4 lg:p-6 h-full">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-2 sm:mb-4 lg:mb-6 gap-3">
+              <div className="flex w-full justify-between items-center mt-8 mb-2 sm:mt-10 sm:mb-4 lg:mt-0 lg:mb-6">
                 <h2 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800">
                   카메라
                 </h2>
-                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full sm:w-auto">
-                  {/* 교육 회차 선택 */}
-                  <div className="flex items-center gap-2 w-full sm:w-auto">
-                    <label className="text-sm font-medium text-gray-700 whitespace-nowrap">
-                      교육 회차:
-                    </label>
-                    <select
-                      value={selectedSessionId}
-                      onChange={(e) => setSelectedSessionId(e.target.value)}
-                      className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-900 bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 min-w-[130px]"
-                      disabled={scanning}
-                    >
-                      {sessionOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  {scanning && (
-                    <div className="flex items-center gap-2 bg-green-100 text-green-800 px-2 py-1 lg:px-3 lg:py-1 rounded-full text-xs lg:text-sm font-medium">
-                      <div className="w-2 h-2 lg:w-3 lg:h-3 bg-green-500 rounded-full animate-pulse"></div>
-                      스캔 중
-                    </div>
-                  )}
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                    교육 회차:
+                  </label>
+                  <select
+                    value={selectedSessionId}
+                    onChange={(e) => setSelectedSessionId(e.target.value)}
+                    className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-900 bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 min-w-[130px]"
+                    disabled={scanning}
+                  >
+                    <option value="" disabled hidden>
+                      회차를 선택하세요
+                    </option>
+                    {sessionOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
@@ -939,7 +966,7 @@ export default function QRScanner() {
               <div
                 id="qr-container"
                 ref={scannerRef}
-                className="w-full bg-gray-900 relative overflow-hidden rounded-lg lg:rounded-xl shadow-lg"
+                className="w-full bg-gray-900 relative overflow-hidden rounded-lg lg:rounded-xl shadow-lg mt-4 sm:mt-6 lg:mt-0 mb-6 sm:mb-8 lg:mb-0"
                 onTouchStart={handleCameraTouch}
                 style={{
                   aspectRatio: "16/9",
@@ -1271,14 +1298,59 @@ export default function QRScanner() {
           <div className="w-full lg:w-80 xl:w-96 flex-shrink-0 border-l border-gray-200">
             <div className="bg-white shadow-xl p-2 sm:p-4 lg:p-6 h-full">
               {/* 출석 기록 헤더 */}
-              <div className="flex items-center justify-between mb-2 sm:mb-4 lg:mb-6">
-                <h2 className="text-base sm:text-lg lg:text-xl font-semibold text-gray-800">
+              <div className="flex items-center gap-2 mb-2 sm:mb-4 lg:mb-6 w-full">
+                <h2 className="text-base sm:text-lg lg:text-xl font-semibold text-gray-800 flex-shrink-0">
                   출석 기록
                 </h2>
+                {/* 세로 배치일 때만 보이는 출석기록 열기 버튼 */}
+                {isVertical && (
+                  <button
+                    className="flex-shrink-0 flex items-center px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold shadow-lg"
+                    style={{ minWidth: 0 }}
+                    onClick={() => {
+                      if (setActiveTab) setActiveTab("records");
+                      setTimeout(() => {
+                        const recordSection = document.getElementById(
+                          "attendance-record-section"
+                        );
+                        if (recordSection) {
+                          const rect = recordSection.getBoundingClientRect();
+                          const scrollTop =
+                            window.pageYOffset ||
+                            document.documentElement.scrollTop;
+                          // 헤더 높이(예: 70px)만큼 offset
+                          const headerOffset = 80;
+                          const top = rect.top + scrollTop - headerOffset;
+                          window.scrollTo({ top, behavior: "smooth" });
+                        }
+                      }, 100);
+                    }}
+                    title="출석 기록 열기"
+                  >
+                    <svg
+                      className="w-4 h-4 mr-1"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
+                      />
+                    </svg>
+                    열기
+                  </button>
+                )}
               </div>
 
               {/* 출석 기록 리스트 */}
-              <div className="space-y-2 lg:space-y-3 max-h-[calc(100vh-150px)] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
+              <div
+                id="attendance-record-section"
+                ref={recordSectionRef}
+                className="space-y-2 lg:space-y-3 max-h-[calc(100vh-150px)] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100"
+              >
                 {attendanceHistory.length === 0 ? (
                   <div className="text-center py-12 sm:py-16 lg:py-20">
                     <div className="w-16 h-16 sm:w-20 sm:h-20 lg:w-24 lg:h-24 mx-auto mb-4 sm:mb-6 bg-gray-100 rounded-full flex items-center justify-center">
@@ -1405,6 +1477,23 @@ export default function QRScanner() {
           </div>
         </div>
       </div>
+
+      {/* 교육 회차 미선택 경고 모달 */}
+      {showSessionAlert && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/30">
+          <div className="bg-white rounded-xl shadow-xl p-8 min-w-[280px] sm:min-w-[340px] max-w-[90vw] flex flex-col items-center">
+            <span className="mb-6 text-lg font-bold text-gray-800 text-center">
+              교육 회차를 선택해 주세요.
+            </span>
+            <button
+              className="px-8 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-base font-semibold mt-2"
+              onClick={() => setShowSessionAlert(false)}
+            >
+              확인
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
