@@ -441,182 +441,176 @@ export default function QRScanner() {
     const newFacing = cameraFacing === "user" ? "environment" : "user";
     const targetDeviceId = newFacing === "user" ? frontCamera : backCamera;
 
-    // 하나의 카메라만 있는 경우
+    // 하나의 카메라만 있는 경우 (iPad 포함 전체 기기 공통)
     if (videoDevices.length < 2) {
       toast.warn("이 기기에는 카메라가 하나만 있습니다.");
       return;
     }
 
+    // 현재 스캐너 중지 후 전환 준비
     try {
-      // 현재 스캐너 중지
       await stopScanner();
-
-      // 카메라 방향 전환
-      setCameraFacing(newFacing);
-
-      // iPad 감지
-      const isIPad =
-        /iPad/.test(navigator.userAgent) ||
-        (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-
-      console.log("iPad 감지:", isIPad);
-      console.log(
-        "사용 가능한 카메라:",
-        videoDevices.map((d) => ({ id: d.deviceId, label: d.label }))
-      );
-      console.log("전환할 카메라 ID:", targetDeviceId);
-
-      // 대기 시간 (카메라 해제 완료)
-      const delay = isIPad ? 2000 : 500;
-
-      setTimeout(async () => {
-        try {
-          setScanning(true);
-          setQrLocation(null);
-
-          const config = {
-            fps: 8,
-            qrbox: undefined,
-            aspectRatio: 16 / 9,
-            disableFlip: false,
-            experimentalFeatures: {
-              useBarCodeDetectorIfSupported: true,
-            },
-          };
-
-          // 카메라 전환용 단계적 시도
-          const switchAttempts = [];
-
-          if (isIPad) {
-            // iPad 전용 전환 로직
-            if (targetDeviceId) {
-              // 1. 기본 설정 (가장 단순한 방식)
-              switchAttempts.push({
-                name: "iPad basic",
-                constraints: {
-                  video: true,
-                },
-              });
-
-              // 2. deviceId만 사용
-              switchAttempts.push({
-                name: "iPad deviceId only",
-                constraints: {
-                  deviceId: targetDeviceId,
-                },
-              });
-
-              // 3. deviceId + 기본 해상도
-              switchAttempts.push({
-                name: "iPad deviceId with resolution",
-                constraints: {
-                  deviceId: targetDeviceId,
-                  width: 640,
-                  height: 480,
-                },
-              });
-
-              // 4. deviceId + 이상적인 해상도
-              switchAttempts.push({
-                name: "iPad deviceId with ideal resolution",
-                constraints: {
-                  deviceId: targetDeviceId,
-                  width: { ideal: 1280 },
-                  height: { ideal: 720 },
-                },
-              });
-            }
-          } else {
-            // 다른 기기용 기존 전환 로직
-            if (targetDeviceId) {
-              switchAttempts.push({
-                name: "deviceId exact",
-                constraints: { deviceId: { exact: targetDeviceId } },
-              });
-            }
-            if (targetDeviceId) {
-              switchAttempts.push({
-                name: "deviceId ideal",
-                constraints: { deviceId: { ideal: targetDeviceId } },
-              });
-            }
-            switchAttempts.push({
-              name: "facingMode exact",
-              constraints: { facingMode: { exact: newFacing } },
-            });
-            switchAttempts.push({
-              name: "facingMode ideal",
-              constraints: { facingMode: { ideal: newFacing } },
-            });
-            switchAttempts.push({
-              name: "facingMode basic",
-              constraints: { facingMode: newFacing },
-            });
-          }
-
-          let switchSuccess = false;
-          let lastSwitchError = null;
-
-          // 각 방식을 순차적으로 시도
-          for (const attempt of switchAttempts) {
-            try {
-              console.log(
-                `카메라 전환 시도: ${attempt.name}`,
-                attempt.constraints
-              );
-              await html5QrCode.start(
-                attempt.constraints,
-                config,
-                onScanSuccess,
-                onScanFailure
-              );
-              console.log(`카메라 전환 성공: ${attempt.name}`);
-              switchSuccess = true;
-              break;
-            } catch (error) {
-              lastSwitchError = error;
-              console.warn(`카메라 전환 ${attempt.name} 실패:`, error);
-
-              if (html5QrCode?.isScanning) {
-                try {
-                  await html5QrCode.stop();
-                } catch (stopError) {
-                  console.warn("전환 중 스캐너 중지 실패:", stopError);
-                }
-              }
-
-              // iPad에서는 더 긴 대기 시간 적용
-              await new Promise((resolve) =>
-                setTimeout(resolve, isIPad ? 500 : 100)
-              );
-            }
-          }
-
-          if (switchSuccess) {
-            toast.success(
-              newFacing === "user"
-                ? "전면 카메라로 전환되었습니다"
-                : "후면 카메라로 전환되었습니다",
-              { toastId: "camera-switch" }
-            );
-          } else {
-            console.error("모든 카메라 전환 시도 실패:", lastSwitchError);
-            throw (
-              lastSwitchError ||
-              new Error("모든 카메라 전환 방식이 실패했습니다.")
-            );
-          }
-        } catch (error) {
-          console.error("카메라 전환 오류:", error);
-          toast.error("카메라 전환에 실패했습니다. 다시 시도해주세요.");
-          setScanning(false);
-          setCameraFacing(cameraFacing === "user" ? "environment" : "user"); // 원래 상태로 복원
-        }
-      }, delay);
-    } catch (error) {
-      console.error("카메라 전환 준비 오류:", error);
-      toast.error("카메라 전환 준비 중 오류가 발생했습니다.");
+    } catch (e) {
+      console.warn("스캐너 중지 중 오류:", e);
     }
+
+    // 상태 업데이트(카메라 방향)
+    setCameraFacing(newFacing);
+
+    // iPad 감지
+    const isIPad =
+      /iPad/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+    console.log("iPad 감지:", isIPad);
+    console.log(
+      "사용 가능한 카메라:",
+      videoDevices.map((d) => ({ id: d.deviceId, label: d.label }))
+    );
+    console.log("전환할 카메라 ID:", targetDeviceId);
+
+    // 대기 시간 (카메라 해제 완료)
+    const delay = isIPad ? 2000 : 500;
+
+    setTimeout(async () => {
+      try {
+        setScanning(true);
+        setQrLocation(null);
+
+        const config = {
+          fps: 8,
+          qrbox: undefined,
+          aspectRatio: 16 / 9,
+          disableFlip: false,
+          experimentalFeatures: {
+            useBarCodeDetectorIfSupported: true,
+          },
+        };
+
+        // 카메라 전환용 단계적 시도
+        const switchAttempts = [];
+
+        if (isIPad) {
+          // iPad 전용 전환 로직 (단순화)
+
+          // 1️⃣ facingMode exact (환경에 맞춰 전환)
+          switchAttempts.push({
+            name: "iPad facingMode exact",
+            constraints: { facingMode: { exact: newFacing } },
+          });
+
+          // 2️⃣ facingMode ideal (브라우저가 가능한 경우 선택)
+          switchAttempts.push({
+            name: "iPad facingMode ideal",
+            constraints: { facingMode: { ideal: newFacing } },
+          });
+
+          // 3️⃣ deviceId exact (가능하다면 특정 카메라 지정)
+          if (targetDeviceId) {
+            switchAttempts.push({
+              name: "iPad deviceId exact",
+              constraints: { deviceId: { exact: targetDeviceId } },
+            });
+
+            // 4️⃣ deviceId ideal
+            switchAttempts.push({
+              name: "iPad deviceId ideal",
+              constraints: { deviceId: { ideal: targetDeviceId } },
+            });
+          }
+
+          // 5️⃣ 마지막 fallback: 아무 제약도 없는 기본 비디오
+          switchAttempts.push({
+            name: "iPad basic video",
+            constraints: { video: true },
+          });
+        } else {
+          // 다른 기기용 기존 전환 로직
+          if (targetDeviceId) {
+            switchAttempts.push({
+              name: "deviceId exact",
+              constraints: { deviceId: { exact: targetDeviceId } },
+            });
+          }
+          if (targetDeviceId) {
+            switchAttempts.push({
+              name: "deviceId ideal",
+              constraints: { deviceId: { ideal: targetDeviceId } },
+            });
+          }
+          switchAttempts.push({
+            name: "facingMode exact",
+            constraints: { facingMode: { exact: newFacing } },
+          });
+          switchAttempts.push({
+            name: "facingMode ideal",
+            constraints: { facingMode: { ideal: newFacing } },
+          });
+          switchAttempts.push({
+            name: "facingMode basic",
+            constraints: { facingMode: newFacing },
+          });
+        }
+
+        let switchSuccess = false;
+        let lastSwitchError = null;
+
+        // 각 방식을 순차적으로 시도
+        for (const attempt of switchAttempts) {
+          try {
+            console.log(
+              `카메라 전환 시도: ${attempt.name}`,
+              attempt.constraints
+            );
+            await html5QrCode.start(
+              attempt.constraints,
+              config,
+              onScanSuccess,
+              onScanFailure
+            );
+            console.log(`카메라 전환 성공: ${attempt.name}`);
+            switchSuccess = true;
+            break;
+          } catch (error) {
+            lastSwitchError = error;
+            console.warn(`카메라 전환 ${attempt.name} 실패:`, error);
+
+            if (html5QrCode?.isScanning) {
+              try {
+                await html5QrCode.stop();
+              } catch (stopError) {
+                console.warn("전환 중 스캐너 중지 실패:", stopError);
+              }
+            }
+
+            // iPad에서는 더 긴 대기 시간 적용
+            await new Promise((resolve) =>
+              setTimeout(resolve, isIPad ? 500 : 100)
+            );
+          }
+        }
+
+        if (switchSuccess) {
+          toast.success(
+            newFacing === "user"
+              ? "전면 카메라로 전환되었습니다"
+              : "후면 카메라로 전환되었습니다",
+            { toastId: "camera-switch" }
+          );
+        } else {
+          console.error("모든 카메라 전환 시도 실패:", lastSwitchError);
+          throw (
+            lastSwitchError ||
+            new Error("모든 카메라 전환 방식이 실패했습니다.")
+          );
+        }
+      } catch (error) {
+        console.error("카메라 전환 오류:", error);
+        toast.error("카메라 전환에 실패했습니다. 다시 시도해주세요.");
+        setScanning(false);
+        setCameraFacing(cameraFacing === "user" ? "environment" : "user"); // 원래 상태로 복원
+      }
+    }, delay);
   };
 
   const onScanSuccess = async (decodedText: string, decodedResult: any) => {
