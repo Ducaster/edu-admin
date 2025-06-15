@@ -459,8 +459,15 @@ export default function QRScanner() {
         /iPad/.test(navigator.userAgent) ||
         (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
+      console.log("iPad 감지:", isIPad);
+      console.log(
+        "사용 가능한 카메라:",
+        videoDevices.map((d) => ({ id: d.deviceId, label: d.label }))
+      );
+      console.log("전환할 카메라 ID:", targetDeviceId);
+
       // 대기 시간 (카메라 해제 완료)
-      const delay = isIPad ? 1500 : 500;
+      const delay = isIPad ? 2000 : 500;
 
       setTimeout(async () => {
         try {
@@ -483,32 +490,37 @@ export default function QRScanner() {
           if (isIPad) {
             // iPad 전용 전환 로직
             if (targetDeviceId) {
-              // 1. deviceId exact + 기본 설정
+              // 1. 기본 설정 (가장 단순한 방식)
               switchAttempts.push({
-                name: "iPad deviceId exact",
+                name: "iPad basic",
                 constraints: {
-                  deviceId: { exact: targetDeviceId },
-                  width: { ideal: 1280 },
-                  height: { ideal: 720 },
-                  frameRate: { ideal: 30 },
+                  video: true,
                 },
               });
 
-              // 2. deviceId exact + 최소 설정
+              // 2. deviceId만 사용
               switchAttempts.push({
-                name: "iPad deviceId exact minimal",
+                name: "iPad deviceId only",
                 constraints: {
-                  deviceId: { exact: targetDeviceId },
-                  width: { min: 640 },
-                  height: { min: 480 },
+                  deviceId: targetDeviceId,
                 },
               });
 
-              // 3. deviceId ideal
+              // 3. deviceId + 기본 해상도
               switchAttempts.push({
-                name: "iPad deviceId ideal",
+                name: "iPad deviceId with resolution",
                 constraints: {
-                  deviceId: { ideal: targetDeviceId },
+                  deviceId: targetDeviceId,
+                  width: 640,
+                  height: 480,
+                },
+              });
+
+              // 4. deviceId + 이상적인 해상도
+              switchAttempts.push({
+                name: "iPad deviceId with ideal resolution",
+                constraints: {
+                  deviceId: targetDeviceId,
                   width: { ideal: 1280 },
                   height: { ideal: 720 },
                 },
@@ -548,12 +560,17 @@ export default function QRScanner() {
           // 각 방식을 순차적으로 시도
           for (const attempt of switchAttempts) {
             try {
+              console.log(
+                `카메라 전환 시도: ${attempt.name}`,
+                attempt.constraints
+              );
               await html5QrCode.start(
                 attempt.constraints,
                 config,
                 onScanSuccess,
                 onScanFailure
               );
+              console.log(`카메라 전환 성공: ${attempt.name}`);
               switchSuccess = true;
               break;
             } catch (error) {
@@ -570,7 +587,7 @@ export default function QRScanner() {
 
               // iPad에서는 더 긴 대기 시간 적용
               await new Promise((resolve) =>
-                setTimeout(resolve, isIPad ? 200 : 100)
+                setTimeout(resolve, isIPad ? 500 : 100)
               );
             }
           }
@@ -583,6 +600,7 @@ export default function QRScanner() {
               { toastId: "camera-switch" }
             );
           } else {
+            console.error("모든 카메라 전환 시도 실패:", lastSwitchError);
             throw (
               lastSwitchError ||
               new Error("모든 카메라 전환 방식이 실패했습니다.")
